@@ -71,14 +71,31 @@ jobs:
       - name: Install dictzip
         run: sudo apt-get install -y dictd
 
+      - name: Get dump date for cache key
+        id: dump-meta
+        run: |
+          DATE=$(curl -sL https://dumps.wikimedia.org/wikidatawiki/latest/ | grep -oP '\d{2}-[A-Z][a-z]{2}-\d{4}' | head -1)
+          echo "date=$DATE" >> $GITHUB_OUTPUT
+          echo "Dump date: $DATE"
+
+      - name: Restore cached dump
+        id: cache-dump
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/wikidict
+          key: wikidata-dump-${{ steps.dump-meta.outputs.date }}
+          restore-keys: |
+            wikidata-dump-
+
       - name: Download Wikidata dump
+        if: steps.cache-dump.outputs.cache-hit != 'true'
         run: |
           mkdir -p ~/.cache/wikidict
           curl -L -o ~/.cache/wikidict/wikidatawiki-latest-wb_items_per_site.sql.gz \
             https://dumps.wikimedia.org/wikidatawiki/latest/wikidatawiki-latest-wb_items_per_site.sql.gz
 
       - name: Generate dictionary
-        run: ./target/release/wikititlepair en zh --download
+        run: ./target/release/wikititlepair en zh
 
       - name: Upload dictionary artifact
         uses: actions/upload-artifact@v5
