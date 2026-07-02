@@ -1,0 +1,9 @@
+/target
+*.dsl
+*.dsl.dz
+*.dict
+*.idx
+*.ifo
+*.csv
+test.*
+dictionary.*
