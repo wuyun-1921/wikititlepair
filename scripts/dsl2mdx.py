@@ -1,18 +1,16 @@
 #!/usr/bin/env python3
-"""Convert ABBYY Lingvo DSL dictionary to MDict MDX format.
+"""Convert wikititlepair DSL output to MDict MDX format.
 
-Fixes four DSL→MDX conversion issues:
-  1. Duplicate headwords: DSL allows same headword with different
-     translations; MDX doesn't. Merged with GROUP_CONCAT.
-  2. Headword not in body: DSL readers display headword automatically;
-     MDX doesn't. Prepended.
-  3. Broken cross-refs: bword:// protocol fails with non-ASCII targets
-     (punycode). Replaced with entry:// + URL-encoding.
-  4. Sorted ordering: DSL entries are sorted; SQLite preserves order
-     via ROWID.
+Parses DSL directly (no pyglossary), merges duplicate headwords,
+fixes link protocols, and packs with mdict-utils.
+
+Fixes DSL→MDX conversion issues:
+  1. Duplicate headwords merged with <br> separators
+  2. Headword prepended in bold
+  3. bword:// → entry:// with URL-encoded non-ASCII targets
 
 Dependencies:
-  pip install pyglossary mdict-utils
+  pip install mdict-utils
 
 Usage:
   python scripts/dsl2mdx.py wikipedia-titlepair-en-zh-20260603.dsl
@@ -20,106 +18,100 @@ Usage:
 """
 
 import argparse
+import gzip
 import re
-import sqlite3
 import subprocess
 import sys
-import tempfile
 import urllib.parse
+from collections import defaultdict
 from pathlib import Path
 
 
-def dsl_to_sqlite(dsl_path: Path, db_path: Path) -> None:
-    """Convert DSL to SQLite via pyglossary."""
-    print(f"[1/4] DSL → SQLite ({dsl_path.name})")
+def parse_dsl(path: Path) -> dict[str, list[str]]:
+    """Parse DSL file. Returns {headword: [body_line, ...]}."""
+    print(f"[1/3] Parsing DSL ({path.name})")
     
-    # Decompress if .dz
-    if dsl_path.suffix == '.dz':
-        import shutil
-        if shutil.which('dictzip'):
-            subprocess.run(['dictzip', '-d', str(dsl_path)], check=True)
-            dsl_path = dsl_path.with_suffix('')
+    # Handle .dz (dictzip, which is just gzip)
+    if path.suffix == '.dz':
+        fh = gzip.open(path, 'rt', encoding='utf-8')
+    else:
+        fh = open(path, 'r', encoding='utf-8')
     
-    subprocess.run([
-        'pyglossary', str(dsl_path), str(db_path),
-        '--read-format=ABBYYLingvoDSL',
-        '--write-format=AyanDictSQLite',
-        '--sqlite',
-    ], check=True)
-    print(f"  → {db_path}")
+    entries = defaultdict(list)
+    headword = None
+    count = 0
+    
+    with fh:
+        for line in fh:
+            line = line.rstrip('\n\r')
+            
+            if not line:
+                continue
+            
+            if line.startswith('#') or line.startswith('\t'):
+                # Header line or body line
+                if headword is not None and (line.startswith('\t') or line.startswith(' ')):
+                    body = line.strip()
+                    if body:
+                        entries[headword].append(body)
+                    continue
+            else:
+                # New headword
+                headword = line
+                count += 1
+                if count % 1000000 == 0:
+                    print(f"  Parsed {count:,} entries...")
+    
+    print(f"  Parsed {count:,} DSL entries, {len(entries):,} unique headwords "
+          f"({count - len(entries):,} merged)")
+    return entries
 
 
-def fix_sqlite(db_path: Path) -> tuple[int, int]:
-    """Fix conversion issues in-place. Returns (before_count, after_count)."""
-    print("[2/4] Fixing duplicates, links, headwords")
-    db = sqlite3.connect(str(db_path))
+def write_mdx_txt(entries: dict[str, list[str]], txt_path: Path) -> int:
+    """Write tab-separated text with link fixes. Returns entry count."""
+    print(f"  Writing {txt_path.name}...")
     
-    before = db.execute('SELECT COUNT(*) FROM entry').fetchone()[0]
+    written = 0
+    with open(txt_path, 'w', encoding='utf-8') as out:
+        for word in sorted(entries.keys(), key=str.lower):
+            bodies = entries[word]
+            
+            # Merge multiple bodies with <br> separators
+            combined = "<br>".join(bodies)
+            
+            # Convert DSL <<cross-ref>> → HTML <a href="entry://...">
+            combined = re.sub(
+                r'<<([^>]*)>>',
+                lambda m: f'<a href="entry://{_encode_link_target(m.group(1))}">{m.group(1)}</a>',
+                combined,
+            )
+            
+            # Prepend bold headword
+            definition = f'<b>{word}</b><br>{combined}'
+            
+            # MDX source format: headword\nbody\n</>\n
+            out.write(f'{word}\n{definition}\n</>\n')
+            written += 1
     
-    # --- Fix 1: Merge duplicate headwords ---
-    db.execute('''
-        CREATE TABLE entry_merged AS
-        SELECT term, GROUP_CONCAT(article, '\n') AS article
-        FROM entry
-        GROUP BY term
-    ''')
-    after = db.execute('SELECT COUNT(*) FROM entry_merged').fetchone()[0]
-    db.execute('DROP TABLE entry')
-    db.execute('ALTER TABLE entry_merged RENAME TO entry')
-    print(f"  Merged {before} → {after} entries ({before - after} duplicates)")
-    
-    # --- Fix 2 + 3: bword:// → entry:// with URL encoding ---
-    def encode_non_ascii_link(m):
-        target = m.group(1)
-        if any(ord(c) > 127 for c in target):
-            encoded = urllib.parse.quote(target, safe='')
-            return f'entry://{encoded}'
-        return f'entry://{target}'
-    
-    def fix_links(article: str) -> str:
-        article = article.replace('bword://', 'entry://')
-        # SQLite REPLACE already handled bword→entry, now URL-encode non-ASCII
-        return re.sub(
-            r'entry://([^"]*)',
-            encode_non_ascii_link,
-            article,
-        )
-    
-    db.create_function("fix_links", 1, fix_links)
-    db.execute("UPDATE entry SET article = fix_links(article)")
-    
-    # --- Fix 4: Prepend headword to body ---
-    db.execute("UPDATE entry SET article = term || '\n<br>\n' || article")
-    
-    db.commit()
-    db.close()
-    return before, after
+    print(f"  Wrote {written:,} entries")
+    return written
 
 
-def sqlite_to_mdx(db_path: Path, mdx_path: Path, title: str) -> None:
-    """Convert fixed SQLite to MDX via mdict-utils."""
-    print("[3/4] SQLite → MDX")
+def _encode_link_target(target: str) -> str:
+    """URL-encode non-ASCII in link targets."""
+    if any(ord(c) > 127 for c in target):
+        return urllib.parse.quote(target, safe='')
+    return target
+
+
+def pack_mdx(txt_path: Path, mdx_path: Path, title: str) -> None:
+    """Pack tab-separated text into MDX via mdict-utils."""
+    print(f"[2/3] Packing MDX ({mdx_path.name})")
     
-    # Create mdx table that mdict-utils expects
-    db = sqlite3.connect(str(db_path))
-    db.execute('DROP TABLE IF EXISTS mdx')
-    db.execute('CREATE TABLE mdx AS SELECT term AS entry, article AS paraphrase FROM entry')
-    db.commit()
-    db.close()
-    
-    # mdict-utils: db → txt → mdx
-    subprocess.run(['mdict', '--db-txt', str(db_path)], check=True)
-    
-    txt_path = Path(str(db_path) + '.txt')
-    
-    # Create title/description HTML files
-    title_path = db_path.with_name('_title.html')
-    desc_path = db_path.with_name('_description.html')
+    title_path = txt_path.parent / '_mdx_title.html'
+    desc_path = txt_path.parent / '_mdx_desc.html'
     title_path.write_text(title, encoding='utf-8')
-    desc_path.write_text(
-        f'Bidirectional Wikipedia title pairs from Wikidata. Generated by wikititlepair.',
-        encoding='utf-8',
-    )
+    desc_path.write_text('Wikipedia title pairs from Wikidata.', encoding='utf-8')
     
     subprocess.run([
         'mdict',
@@ -129,8 +121,7 @@ def sqlite_to_mdx(db_path: Path, mdx_path: Path, title: str) -> None:
         str(mdx_path),
     ], check=True)
     
-    # Cleanup intermediates
-    for p in [txt_path, title_path, desc_path]:
+    for p in [title_path, desc_path]:
         p.unlink(missing_ok=True)
     
     print(f"  → {mdx_path} ({mdx_path.stat().st_size / 1e6:.1f} MB)")
@@ -138,14 +129,14 @@ def sqlite_to_mdx(db_path: Path, mdx_path: Path, title: str) -> None:
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Convert DSL dictionary to MDict MDX format',
+        description='Convert wikititlepair DSL to MDict MDX format',
     )
     parser.add_argument('dsl', type=Path, help='Input .dsl or .dsl.dz file')
     parser.add_argument('-o', '--output', type=Path, help='Output .mdx path (default: same name)')
     parser.add_argument('-t', '--title', default='Wikipedia Title Pairs',
                         help='Dictionary title shown in reader')
-    parser.add_argument('--keep-db', action='store_true',
-                        help='Keep intermediate SQLite database')
+    parser.add_argument('--keep-txt', action='store_true',
+                        help='Keep intermediate tab-separated text file')
     args = parser.parse_args()
     
     dsl_path = args.dsl.resolve()
@@ -153,19 +144,19 @@ def main():
         sys.exit(f"Error: {dsl_path} not found")
     
     mdx_path = args.output or dsl_path.with_suffix('.mdx')
-    db_path = mdx_path.with_suffix('.db')
+    txt_path = mdx_path.with_suffix('.txt')
     
     print(f"DSL → MDX: {dsl_path.name} → {mdx_path.name}\n")
     
-    dsl_to_sqlite(dsl_path, db_path)
-    before, after = fix_sqlite(db_path)
-    sqlite_to_mdx(db_path, mdx_path, args.title)
+    entries = parse_dsl(dsl_path)
+    write_mdx_txt(entries, txt_path)
+    pack_mdx(txt_path, mdx_path, args.title)
     
-    if not args.keep_db:
-        db_path.unlink()
-        print(f"[4/4] Cleaned up {db_path.name}")
+    if not args.keep_txt:
+        txt_path.unlink()
+        print(f"[3/3] Cleaned up {txt_path.name}")
     
-    print(f"\nDone. {after} entries in {mdx_path}")
+    print(f"\nDone. {mdx_path}")
 
 
 if __name__ == '__main__':
