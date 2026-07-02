@@ -93,15 +93,8 @@ jobs:
           restore-keys: |
             wikidata-dump-
 
-      - name: Download Wikidata dump
-        if: steps.cache-dump.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p ~/.cache/wikidict
-          curl -L -o ~/.cache/wikidict/wikidatawiki-latest-wb_items_per_site.sql.gz \
-            https://dumps.wikimedia.org/wikidatawiki/latest/wikidatawiki-latest-wb_items_per_site.sql.gz
-
       - name: Generate dictionary
-        run: ./target/release/wikititlepair en zh
+        run: ./target/release/wikititlepair en zh --download
 
       - name: Convert to MDX
         run: |
