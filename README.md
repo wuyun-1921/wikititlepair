@@ -13,11 +13,8 @@ A pre-built **English ↔ Chinese** bi-directional dictionary is included in rel
 ## Usage
 
 ```bash
-# English ↔ Chinese
+# Any two Wikipedia languages
 wikititlepair en zh
-
-# Any two Wikipedia languages (e.g. Japanese ↔ Korean)
-wikititlepair ja ko
 
 # Allow downloading dump if not cached
 wikititlepair en zh --download
