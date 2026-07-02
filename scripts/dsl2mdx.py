@@ -67,6 +67,33 @@ def parse_dsl(path: Path) -> dict[str, list[str]]:
     return entries
 
 
+def _unescape_dsl(text: str) -> str:
+    """Reverse DSL backslash escapes. Does NOT HTML-escape."""
+    text = text.replace('\\\\', '\\')
+    text = text.replace(r'\(', '(')
+    text = text.replace(r'\)', ')')
+    text = text.replace(r'\{', '{')
+    text = text.replace(r'\}', '}')
+    text = text.replace(r'\[', '[')
+    text = text.replace(r'\]', ']')
+    text = text.replace(r'\#', '#')
+    text = text.replace(r'\@', '@')
+    text = text.replace(r'\<', '<')
+    text = text.replace(r'\>', '>')
+    text = text.replace(r'\~', '~')
+    text = text.replace(r'\^', '^')
+    return text
+
+
+def _html_escape(text: str) -> str:
+    """HTML-escape for safe display in MDX."""
+    text = text.replace('&', '&amp;')
+    text = text.replace('<', '&lt;')
+    text = text.replace('>', '&gt;')
+    text = text.replace('"', '&quot;')
+    return text
+
+
 def write_mdx_txt(entries: dict[str, list[str]], txt_path: Path) -> int:
     """Write tab-separated text with link fixes. Returns entry count."""
     print(f"  Writing {txt_path.name}...")
@@ -76,21 +103,28 @@ def write_mdx_txt(entries: dict[str, list[str]], txt_path: Path) -> int:
         for word in sorted(entries.keys(), key=str.lower):
             bodies = entries[word]
             
+            # Unescape DSL escapes for HTML display
+            word_clean = _unescape_dsl(word)
+            word_html = _html_escape(word_clean)
+            
             # Merge multiple bodies with <br> separators
             combined = "<br>".join(bodies)
             
             # Convert DSL <<cross-ref>> → HTML <a href="entry://...">
             combined = re.sub(
                 r'<<([^>]*)>>',
-                lambda m: f'<a href="entry://{_encode_link_target(m.group(1))}">{m.group(1)}</a>',
+                lambda m: (
+                    f'<a href="entry://{_encode_link_target(_unescape_dsl(m.group(1)))}">'
+                    f'{_html_escape(_unescape_dsl(m.group(1)))}</a>'
+                ),
                 combined,
             )
             
-            # Prepend bold headword
-            definition = f'<b>{word}</b><br>{combined}'
+            # Prepend bold headword (HTML-safe)
+            definition = f'<b>{word_html}</b><br>{combined}'
             
-            # MDX source format: headword\nbody\n</>\n
-            out.write(f'{word}\n{definition}\n</>\n')
+            # MDX key: unescaped plain text for searchability
+            out.write(f'{word_clean}\n{definition}\n</>\n')
             written += 1
     
     print(f"  Wrote {written:,} entries")
