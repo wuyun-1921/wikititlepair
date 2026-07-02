@@ -342,11 +342,37 @@ fn parse_dump(path: &Path, lang_a: &str, lang_b: &str) -> Result<Vec<(String, St
     Ok(entries)
 }
 
-/// Escape parentheses in DSL headwords/body text.
-/// DSL treats ( ) as optional part markers, so we must escape them with backslash
-/// to make them literal characters.
-fn escape_dsl_parens(s: &str) -> String {
-    s.replace('(', "\\(").replace(')', "\\)")
+/// Escape special characters in DSL headwords and cross-references.
+/// DSL uses these characters for markup, so we must backslash-escape them
+/// to make them literal text. Backslash itself must be doubled.
+/// See docs/dsl-format.md for the full reference.
+fn escape_dsl(s: &str) -> String {
+    let mut result = String::with_capacity(s.len() + 16);
+    for ch in s.chars() {
+        match ch {
+            // Backslash must come first - double it
+            '\\' => result.push_str("\\\\"),
+            // Parentheses mark optional parts of headword
+            '(' => result.push_str("\\("),
+            ')' => result.push_str("\\)"),
+            // Curly braces mark unsorted parts of headword
+            '{' => result.push_str("\\{"),
+            '}' => result.push_str("\\}"),
+            // Square brackets forbidden in heading
+            '[' => result.push_str("\\["),
+            ']' => result.push_str("\\]"),
+            // Forbidden in heading
+            '#' => result.push_str("\\#"),
+            '@' => result.push_str("\\@"),
+            '<' => result.push_str("\\<"),
+            '>' => result.push_str("\\>"),
+            // Forbidden in first heading
+            '~' => result.push_str("\\~"),
+            '^' => result.push_str("\\^"),
+            _ => result.push(ch),
+        }
+    }
+    result
 }
 
 fn unquote(s: &str) -> String {
@@ -415,8 +441,8 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     writeln!(file)?;
     
     for (a, b) in &entries {
-        writeln!(file, "{}", escape_dsl_parens(a))?;
-        writeln!(file, "\t<<{}>>", escape_dsl_parens(b))?;
+        writeln!(file, "{}", escape_dsl(a))?;
+        writeln!(file, "\t<<{}>>", escape_dsl(b))?;
     }
 
     eprintln!(
