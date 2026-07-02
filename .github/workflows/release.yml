@@ -56,8 +56,38 @@ jobs:
           name: wikititlepair-${{ matrix.target }}
           path: wikititlepair-${{ matrix.target }}.*
 
+  dictionary:
+    runs-on: ubuntu-latest
+    name: Build EN-ZH dictionary
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build wikititlepair
+        run: cargo build --release
+
+      - name: Install dictzip
+        run: sudo apt-get install -y dictzip
+
+      - name: Download Wikidata dump
+        run: |
+          mkdir -p ~/.cache/wikidict
+          curl -L -o ~/.cache/wikidict/wikidatawiki-latest-wb_items_per_site.sql.gz \
+            https://dumps.wikimedia.org/wikidatawiki/latest/wikidatawiki-latest-wb_items_per_site.sql.gz
+
+      - name: Generate dictionary
+        run: ./target/release/wikititlepair en zh --download
+
+      - name: Upload dictionary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dictionary
+          path: wikipedia-titlepair-en-zh-*.dsl*
+
   release:
-    needs: build
+    needs: [build, dictionary]
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
@@ -72,3 +102,5 @@ jobs:
           files: |
             wikititlepair-*.tar.gz
             wikititlepair-*.zip
+            wikipedia-titlepair-*.dsl*
+            !*.dsl
