@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -255,7 +255,7 @@ fn parse_insert_line(line: &str, site_a: &str, site_b: &str, items_a: &mut HashM
 
 fn parse_dump(path: &Path, lang_a: &str, lang_b: &str) -> Result<Vec<(String, String)>> {
     // Read entire file into memory for multi-threaded processing
-    let mut file = File::open(path)?;
+    let file = File::open(path)?;
     let mut decoder = GzDecoder::new(file);
     let mut contents = Vec::new();
     decoder.read_to_end(&mut contents)?;
@@ -311,19 +311,18 @@ fn parse_dump(path: &Path, lang_a: &str, lang_b: &str) -> Result<Vec<(String, St
     
     eprintln!("\n  Merging results...");
     
-    // Merge all results
-    let mut items_a: HashMap<u32, String> = HashMap::new();
-    let mut items_b: HashMap<u32, String> = HashMap::new();
-    
-    for (chunk_a, chunk_b) in results {
-        for (k, v) in chunk_a {
-            items_a.insert(k, v);
-        }
-        for (k, v) in chunk_b {
-            items_b.insert(k, v);
-        }
-    }
-    
+    // Parallel merge results using rayon reduce
+    let (items_a, items_b) = results
+        .into_par_iter()
+        .reduce(
+            || (HashMap::new(), HashMap::new()),
+            |(mut a1, mut b1), (a2, b2)| {
+                a1.extend(a2);
+                b1.extend(b2);
+                (a1, b1)
+            },
+        );
+
     // Build dictionary: items that exist in both languages
     let mut entries = Vec::new();
     let mut skipped = 0u64;
@@ -342,7 +341,7 @@ fn parse_dump(path: &Path, lang_a: &str, lang_b: &str) -> Result<Vec<(String, St
     let matched = entries.len() / 2;
     eprintln!("  Found {} matching items ({} entries, {} skipped)", matched, entries.len(), skipped);
     
-    entries.sort();
+    entries.par_sort();
     entries.dedup();
     Ok(entries)
 }
@@ -473,22 +472,30 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
     eprintln!("\nParsing dump...");
     let entries = parse_dump(&dump_path, &cli.lang_a, &cli.lang_b)?;
+    let entry_count = entries.len();
 
-    let mut file = File::create(&output)?;
+    // Pre-compute escaped DSL strings in parallel
+    eprintln!("  Escaping {} entries to DSL...", entry_count);
+    let escaped: Vec<(String, String)> = entries
+        .into_par_iter()
+        .map(|(a, b)| (escape_dsl(&a), escape_dsl(&b)))
+        .collect();
+
+    let mut file = BufWriter::new(File::create(&output)?);
     // DSL format for ABBYY Lingvo
     writeln!(file, "#NAME \"wikipedia titlepair ({}-{})\"", cli.lang_a, cli.lang_b)?;
     writeln!(file, "#INDEX_LANGUAGE \"{}\"", cli.lang_a)?;
     writeln!(file, "#CONTENTS_LANGUAGE \"{}\"", cli.lang_b)?;
     writeln!(file)?;
     
-    for (a, b) in &entries {
-        writeln!(file, "{}", escape_dsl(a))?;
-        writeln!(file, "\t<<{}>>", escape_dsl(b))?;
+    for (a, b) in &escaped {
+        write!(file, "{}\n\t<<{}>>\n", a, b)?;
     }
+    file.flush()?;
 
     eprintln!(
         "\nDone! {} entries written to {}",
-        entries.len(),
+        entry_count,
         output.display()
     );
 
