@@ -517,3 +517,126 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_escape_dsl_parens() {
+        assert_eq!(escape_dsl("Music (2021)"), "Music \\(2021\\)");
+        assert_eq!(escape_dsl("C#"), "C\\#");
+        assert_eq!(escape_dsl("A < B"), "A \\< B");
+        assert_eq!(escape_dsl("x ~ y"), "x \\~ y");
+        assert_eq!(escape_dsl("x^2"), "x\\^2");
+        assert_eq!(escape_dsl("path\\to"), "path\\\\to");
+        assert_eq!(escape_dsl("no escape"), "no escape");
+        assert_eq!(escape_dsl("音乐"), "音乐");
+    }
+
+    #[test]
+    fn test_is_non_article() {
+        assert!(is_non_article("Category:Music"));
+        assert!(is_non_article("Template:Infobox"));
+        assert!(is_non_article("Wikipedia:About"));
+        assert!(is_non_article("Help:Contents"));
+        assert!(is_non_article("Module:Math"));
+        assert!(is_non_article("User:Test"));
+        assert!(!is_non_article("Music"));
+        assert!(!is_non_article("Doraemon: Story"));
+        assert!(!is_non_article("Star Wars: Episode IV"));
+    }
+
+    #[test]
+    fn test_unquote() {
+        assert_eq!(unquote("'hello'"), "hello");
+        assert_eq!(unquote("'it\\'s'"), "it's");
+        assert_eq!(unquote("'back\\\\slash'"), "back\\slash");
+        assert_eq!(unquote("'quote\\\"test\\\"'"), "quote\"test\"");
+        assert_eq!(unquote("'new\\nline'"), "new\nline");
+    }
+
+    #[test]
+    fn test_parse_insert_line() {
+        // Tiny synthetic SQL: one enwiki item, one zhwiki item, same item_id
+        let sql = "INSERT INTO wb_items_per_site VALUES (1,42,'enwiki','Music'),(2,42,'zhwiki','音乐')";
+        let mut items_a = HashMap::new();
+        let mut items_b = HashMap::new();
+        parse_insert_line(sql, "enwiki", "zhwiki", &mut items_a, &mut items_b);
+        assert_eq!(items_a.get(&42).unwrap(), "Music");
+        assert_eq!(items_b.get(&42).unwrap(), "音乐");
+    }
+
+    #[test]
+    fn test_parse_skips_non_article() {
+        let sql = "INSERT INTO wb_items_per_site VALUES (1,1,'enwiki','Music'),(2,1,'zhwiki','音乐'),(3,2,'enwiki','Category:Music'),(4,2,'zhwiki','Category:音乐')";
+        let mut items_a = HashMap::new();
+        let mut items_b = HashMap::new();
+        parse_insert_line(sql, "enwiki", "zhwiki", &mut items_a, &mut items_b);
+        // Only article (item 1): kept
+        assert_eq!(items_a.get(&1).unwrap(), "Music");
+        assert_eq!(items_b.get(&1).unwrap(), "音乐");
+        // Category (item 2): skipped
+        assert!(!items_a.contains_key(&2));
+        assert!(!items_b.contains_key(&2));
+    }
+
+    #[test]
+    fn test_full_pipeline_tiny_dump() {
+        // Build a minimal gzipped SQL dump with 2 matched items
+        let sql = "INSERT INTO wb_items_per_site VALUES (1,1,'enwiki','Music'),(2,1,'zhwiki','音乐');\nINSERT INTO wb_items_per_site VALUES (3,2,'enwiki','Hello'),(4,2,'zhwiki','你好');\nINSERT INTO wb_items_per_site VALUES (5,3,'enwiki','Same'),(6,3,'zhwiki','Same');\n";
+        use std::io::Write;
+        let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        gz.write_all(sql.as_bytes()).unwrap();
+        let compressed = gz.finish().unwrap();
+
+        // Write to temp file
+        let tmp = std::env::temp_dir().join("wikidict_test_dump.sql.gz");
+        std::fs::write(&tmp, &compressed).unwrap();
+
+        let entries = parse_dump(&tmp, "en", "zh").unwrap();
+        std::fs::remove_file(&tmp).ok();
+
+        // 2 matched pairs × 2 directions = 4 entries (Same skipped: identical titles)
+        assert_eq!(entries.len(), 4);
+        assert!(entries.contains(&("Music".to_string(), "音乐".to_string())));
+        assert!(entries.contains(&("音乐".to_string(), "Music".to_string())));
+        assert!(entries.contains(&("Hello".to_string(), "你好".to_string())));
+        assert!(entries.contains(&("你好".to_string(), "Hello".to_string())));
+        // Same→Same should be skipped (identical case-insensitive)
+        assert!(!entries.contains(&("Same".to_string(), "Same".to_string())));
+    }
+
+    #[test]
+    fn test_dsl_output_format() {
+        // Test that DSL metadata is correct
+        let entries = vec![
+            ("Music".to_string(), "音乐".to_string()),
+            ("音乐".to_string(), "Music".to_string()),
+        ];
+        let escaped: Vec<_> = entries
+            .into_iter()
+            .map(|(a, b)| (escape_dsl(&a), escape_dsl(&b)))
+            .collect();
+
+        let tmp = std::env::temp_dir().join("wikidict_test_output.dsl");
+        {
+            let mut f = BufWriter::new(File::create(&tmp).unwrap());
+            writeln!(f, "#NAME \"wikipedia titlepair (en-zh)\"").unwrap();
+            writeln!(f, "#INDEX_LANGUAGE \"en-zh\"").unwrap();
+            writeln!(f, "#CONTENTS_LANGUAGE \"en-zh\"").unwrap();
+            writeln!(f).unwrap();
+            for (a, b) in &escaped {
+                write!(f, "{}\n\t<<{}>>\n", a, b).unwrap();
+            }
+        }
+
+        let content = std::fs::read_to_string(&tmp).unwrap();
+        std::fs::remove_file(&tmp).ok();
+
+        assert!(content.contains("#NAME \"wikipedia titlepair (en-zh)\""));
+        assert!(content.contains("#INDEX_LANGUAGE \"en-zh\""));
+        assert!(content.contains("Music\n\t<<音乐>>"));
+        assert!(content.contains("音乐\n\t<<Music>>"));
+    }
+}
