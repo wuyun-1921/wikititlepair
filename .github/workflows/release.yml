@@ -97,11 +97,18 @@ jobs:
       - name: Generate dictionary
         run: ./target/release/wikititlepair en zh
 
-      - name: Upload dictionary artifact
+      - name: Convert to MDX
+        run: |
+          pip install mdict-utils
+          python scripts/dsl2mdx.py wikipedia-titlepair-en-zh-*.dsl -t "wikipedia titlepair (en-zh)"
+
+      - name: Upload dictionary artifacts
         uses: actions/upload-artifact@v5
         with:
           name: dictionary
-          path: wikipedia-titlepair-en-zh-*.dsl*
+          path: |
+            wikipedia-titlepair-en-zh-*.dsl*
+            wikipedia-titlepair-en-zh-*.mdx
 
   release:
     needs: [build, dictionary]
@@ -139,4 +146,5 @@ jobs:
             wikititlepair-*.tar.gz
             wikititlepair-*.zip
             wikipedia-titlepair-*.dsl*
+            wikipedia-titlepair-*.mdx
             !*.dsl
