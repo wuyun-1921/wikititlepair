@@ -19,14 +19,8 @@ wikititlepair en zh
 # Japanese ↔ Korean
 wikititlepair ja ko
 
-# French ↔ German (custom output)
-wikititlepair fr de -o french-german.dsl
-
 # Allow downloading dump if not cached
 wikititlepair en zh --download
-
-# Any two Wikipedia language codes work
-wikititlepair es pt
 ```
 
 ## Output format
