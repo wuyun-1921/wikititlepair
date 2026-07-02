@@ -240,6 +240,11 @@ fn parse_insert_line(line: &str, site_a: &str, site_b: &str, items_a: &mut HashM
         // Parse title (field 3, unquoted)
         let title = unquote(fields[3]).replace('_', " ");
         
+        // Skip non-article namespace pages
+        if is_non_article(&title) {
+            continue;
+        }
+        
         if site_id == site_a {
             items_a.insert(item_id, title);
         } else if site_id == site_b {
@@ -340,6 +345,41 @@ fn parse_dump(path: &Path, lang_a: &str, lang_b: &str) -> Result<Vec<(String, St
     entries.sort();
     entries.dedup();
     Ok(entries)
+}
+
+/// MediaWiki namespace canonical names (English). The Wikidata dump always
+/// uses English canonical names regardless of the wiki's language.
+/// See https://www.mediawiki.org/wiki/Manual:Namespace
+static NON_ARTICLE_PREFIXES: &[&str] = &[
+    "Category",
+    "Template",
+    "Wikipedia",
+    "Portal",
+    "Help",
+    "Module",
+    "WikiProject",
+    "User",
+    "File",
+    "Image",
+    "MediaWiki",
+    "TimedText",
+    "Draft",
+    "Media",
+    "Special",
+    "Talk",
+    "WP",
+];
+
+/// Returns true if the title is a non-article namespace page
+/// (e.g. "Category:Music", "Template:Infobox").
+fn is_non_article(title: &str) -> bool {
+    for prefix in NON_ARTICLE_PREFIXES {
+        let needle = [prefix, ":"].concat();
+        if title.starts_with(&needle) {
+            return true;
+        }
+    }
+    false
 }
 
 /// Escape special characters in DSL headwords and cross-references.
