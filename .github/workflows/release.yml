@@ -105,8 +105,10 @@ jobs:
 
       - name: Convert to MDX
         run: |
+          dictzip -d wikipedia-titlepair-en-zh-*.dsl.dz
           pip install mdict-utils
           python scripts/dsl2mdx.py wikipedia-titlepair-en-zh-*.dsl -t "wikipedia titlepair (en-zh)"
+          dictzip wikipedia-titlepair-en-zh-*.dsl
 
       - name: Bundle dictionaries with icon
         run: |
