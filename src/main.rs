@@ -482,10 +482,14 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .collect();
 
     let mut file = BufWriter::new(File::create(&output)?);
+    // Sort lang codes for consistent metadata (en zh == zh en)
+    let mut meta_langs = [cli.lang_a.as_str(), cli.lang_b.as_str()];
+    meta_langs.sort();
+    let lang_pair = format!("{}-{}", meta_langs[0], meta_langs[1]);
     // DSL format for ABBYY Lingvo
-    writeln!(file, "#NAME \"wikipedia titlepair ({}-{})\"", cli.lang_a, cli.lang_b)?;
-    writeln!(file, "#INDEX_LANGUAGE \"{}\"", cli.lang_a)?;
-    writeln!(file, "#CONTENTS_LANGUAGE \"{}\"", cli.lang_b)?;
+    writeln!(file, "#NAME \"wikipedia titlepair ({})\"", lang_pair)?;
+    writeln!(file, "#INDEX_LANGUAGE \"{}\"",lang_pair)?;
+    writeln!(file, "#CONTENTS_LANGUAGE \"{}\"", lang_pair)?;
     writeln!(file)?;
     
     for (a, b) in &escaped {
