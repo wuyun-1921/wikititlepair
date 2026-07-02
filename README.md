@@ -17,9 +17,10 @@ wikititlepair en zh --download # fetch dump if not cached
 
 ## Build
 
+Requires Rust 1.75+, and `dictd` package (provides `dictzip` for .dsl.dz compression).
+
 ```sh
 cargo build --release
-# requires dictzip (dictd package) for .dsl.dz compression
 ```
 
 ## Formats
