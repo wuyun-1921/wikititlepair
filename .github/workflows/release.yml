@@ -104,7 +104,7 @@ jobs:
 
       - name: Bundle dictionaries with icon
         run: |
-          ICON=assets/wikipedia.ico
+          ICON=assets/wikidata.ico
           for FMT in dsl mdx; do
             if [ "$FMT" = "dsl" ]; then
               DICT=$(ls wikipedia-titlepair-en-zh-*.dsl.dz | head -1)
