@@ -80,7 +80,7 @@ jobs:
       - name: Get dump date for cache key
         id: dump-meta
         run: |
-          DATE=$(curl -sL https://dumps.wikimedia.org/wikidatawiki/latest/ | grep -oP '\d{2}-[A-Z][a-z]{2}-\d{4}' | head -1)
+          DATE=$(curl -sL https://dumps.wikimedia.org/wikidatawiki/latest/ | grep 'wb_items_per_site.sql.gz' | grep -oP '\d{2}-[A-Z][a-z]{2}-\d{4}' | head -1)
           echo "date=$DATE" >> $GITHUB_OUTPUT
           echo "Dump date: $DATE"
 
