@@ -12,7 +12,7 @@ Includes pre-built **English ↔ Chinese** bi-directional dictionary updated fro
 
 ## Auto-update
 
-Wikidata database updates approximately every two months. A scheduled workflow checks for updates and publishes a new dictionary release if the database is newer than the last release - no recompilation needed if no code changes.
+A scheduled workflow checks weekly for new Wikidata dumps and publishes an updated dictionary if available - no recompilation needed if no code changes.
 
 ## Usage
 
