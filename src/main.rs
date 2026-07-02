@@ -48,6 +48,43 @@ fn dump_url() -> String {
     "https://dumps.wikimedia.org/wikidatawiki/latest/wikidatawiki-latest-wb_items_per_site.sql.gz".to_string()
 }
 
+fn get_dump_date() -> Result<String> {
+    let output = Command::new("curl")
+        .args(["-s", "https://dumps.wikimedia.org/wikidatawiki/latest/"])
+        .output()?;
+    
+    let html = String::from_utf8_lossy(&output.stdout);
+    // Parse date from HTML: "03-Jun-2026"
+    for line in html.lines() {
+        if line.contains("wb_items_per_site.sql.gz") {
+            if let Some(pos) = line.find("-Jun-") {
+                // Extract "DD-Mon-YYYY" pattern
+                let start = pos - 2;
+                let end = pos + 9;
+                if end <= line.len() {
+                    let date_str = &line[start..end];
+                    // Convert to YYYYMMDD
+                    let parts: Vec<&str> = date_str.split('-').collect();
+                    if parts.len() == 3 {
+                        let day = parts[0];
+                        let month = match parts[1] {
+                            "Jan" => "01", "Feb" => "02", "Mar" => "03",
+                            "Apr" => "04", "May" => "05", "Jun" => "06",
+                            "Jul" => "07", "Aug" => "08", "Sep" => "09",
+                            "Oct" => "10", "Nov" => "11", "Dec" => "12",
+                            _ => continue,
+                        };
+                        let year = parts[2];
+                        return Ok(format!("{}{}{}", year, month, day));
+                    }
+                }
+            }
+        }
+    }
+    
+    Err(WikiDictError::Parse("Could not parse dump date".to_string()))
+}
+
 fn download_file(url: &str, path: &Path) -> Result<()> {
     let filename = path.file_name().unwrap().to_str().unwrap();
 
@@ -352,14 +389,8 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
     let dump_path = ensure_dump(&cache_dir, cli.download)?;
     
-    // Get dump file date for filename
-    let dump_date = std::fs::metadata(&dump_path)
-        .and_then(|m| m.modified())
-        .map(|t| {
-            let datetime: chrono::DateTime<chrono::Local> = t.into();
-            datetime.format("%Y%m%d").to_string()
-        })
-        .unwrap_or_else(|_| "latest".to_string());
+    // Get dump date from Wikidata
+    let dump_date = get_dump_date().unwrap_or_else(|_| "latest".to_string());
     
     // Default output filename: wikipedia-titlepair-en-zh-20250702.dsl
     let output = cli.output.unwrap_or_else(|| {
