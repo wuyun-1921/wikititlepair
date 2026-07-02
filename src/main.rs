@@ -395,6 +395,7 @@ fn unquote(s: &str) -> String {
                 b'n' => { result.push(b'\n'); i += 2; }
                 b'r' => { result.push(b'\r'); i += 2; }
                 b't' => { result.push(b'\t'); i += 2; }
+                b'"' => { result.push(b'"'); i += 2; }
                 _ => { result.push(bytes[i]); i += 1; }
             }
         } else if bytes[i] == b'\'' && i + 1 < len && bytes[i + 1] == b'\'' {
