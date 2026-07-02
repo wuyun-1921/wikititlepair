@@ -44,6 +44,10 @@ Clicking `音乐` in the Music entry jumps to the `音乐` entry.
 - Rust 1.75+
 - `dictzip` (for `.dsl.dz` compression)
 
+## Data Source
+
+Uses the Wikidata [`wb_items_per_site` dump](https://dumps.wikimedia.org/wikidatawiki/latest/wikidatawiki-latest-wb_items_per_site.sql.gz) (~1.8GB compressed). This table maps Wikipedia page titles across all language editions via shared Wikidata item IDs.
+
 ## Cache
 
-Dump files are cached in `~/.cache/wikidict/`. The full Wikidata dump is ~1.8GB compressed.
+Dump files are cached in `~/.cache/wikidict/`.
