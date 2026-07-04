@@ -84,7 +84,7 @@ jobs:
         if: steps.check.outputs.update == 'true'
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Build release binary
+      - name: Build wikitools
         if: steps.check.outputs.update == 'true'
         run: cargo build --release
 
@@ -97,21 +97,21 @@ jobs:
         id: cache-dump
         uses: actions/cache@v4
         with:
-          path: ~/.cache/wikidict
-          key: wikidata-dump-${{ steps.dump-date.outputs.date }}
+          path: ~/.cache/wikitools
+          key: wikitools-wikidata-${{ steps.dump-date.outputs.date }}
           restore-keys: |
-            wikidata-dump-
+            wikitools-wikidata-
 
       - name: Download Wikidata dump
         if: steps.check.outputs.update == 'true' && steps.cache-dump.outputs.cache-hit != 'true'
         run: |
-          mkdir -p ~/.cache/wikidict
-          curl -L -o ~/.cache/wikidict/wikidatawiki-latest-wb_items_per_site.sql.gz \
+          mkdir -p ~/.cache/wikitools
+          curl -L -o ~/.cache/wikitools/wikidatawiki-latest-wb_items_per_site.sql.gz \
             https://dumps.wikimedia.org/wikidatawiki/latest/wikidatawiki-latest-wb_items_per_site.sql.gz
 
       - name: Generate dictionary
         if: steps.check.outputs.update == 'true'
-        run: ./target/release/wikititlepair en zh
+        run: ./target/release/wikitools pair en zh
 
       - name: Upload dictionary artifact
         if: steps.check.outputs.update == 'true'
@@ -119,6 +119,19 @@ jobs:
         with:
           name: dictionary
           path: wikipedia-titlepair-en-zh-*.dsl*
+
+      - name: Generate titles dictionaries
+        if: steps.check.outputs.update == 'true'
+        run: |
+          ./target/release/wikitools titles en --download
+          ./target/release/wikitools titles zh --download
+
+      - name: Upload titles artifacts
+        if: steps.check.outputs.update == 'true'
+        uses: actions/upload-artifact@v5
+        with:
+          name: titles-dictionaries
+          path: wikipedia-titles-*.dsl*
 
       - name: Release dictionary
         if: steps.check.outputs.update == 'true'

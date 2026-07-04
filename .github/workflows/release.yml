@@ -43,21 +43,21 @@ jobs:
         if: matrix.os != 'windows-latest'
         run: |
           cd target/${{ matrix.target }}/release
-          tar czf ../../../wikititlepair-${{ matrix.target }}.tar.gz wikititlepair
+          tar czf ../../../wikitools-${{ matrix.target }}.tar.gz wikitools
           cd ../../..
 
       - name: Package (Windows)
         if: matrix.os == 'windows-latest'
         run: |
           cd target/${{ matrix.target }}/release
-          7z a ../../../wikititlepair-${{ matrix.target }}.zip wikititlepair.exe
+          7z a ../../../wikitools-${{ matrix.target }}.zip wikitools.exe
           cd ../../..
 
       - name: Upload artifact
         uses: actions/upload-artifact@v5
         with:
-          name: wikititlepair-${{ matrix.target }}
-          path: wikititlepair-${{ matrix.target }}.*
+          name: wikitools-${{ matrix.target }}
+          path: wikitools-${{ matrix.target }}.*
 
   dictionary:
     runs-on: ubuntu-latest
@@ -71,7 +71,7 @@ jobs:
       - name: Run tests
         run: cargo test
 
-      - name: Build wikititlepair
+      - name: Build wikitools
         run: cargo build --release
 
       - name: Install dictzip
@@ -88,13 +88,13 @@ jobs:
         id: cache-dump
         uses: actions/cache@v4
         with:
-          path: ~/.cache/wikidict
-          key: wikidata-dump-${{ steps.dump-meta.outputs.date }}
+          path: ~/.cache/wikitools
+          key: wikitools-wikidata-${{ steps.dump-meta.outputs.date }}
           restore-keys: |
-            wikidata-dump-
+            wikitools-wikidata-
 
       - name: Generate dictionary
-        run: ./target/release/wikititlepair en zh --download
+        run: ./target/release/wikitools pair en zh --download
 
       - name: Convert to MDX
         run: |
@@ -102,6 +102,11 @@ jobs:
           pip install mdict-utils
           python scripts/dsl2mdx.py wikipedia-titlepair-en-zh-*.dsl -t "wikipedia titlepair (en-zh)"
           dictzip wikipedia-titlepair-en-zh-*.dsl
+
+      - name: Generate titles dictionaries
+        run: |
+          ./target/release/wikitools titles en --download
+          ./target/release/wikitools titles zh --download
 
       - name: Bundle dictionaries with icon
         run: |
@@ -118,12 +123,23 @@ jobs:
             echo "  ${BASE}-${FMT}.tar.gz"
           done
 
+          echo "---"
+          # Bundle titles dictionaries
+          ICON=assets/wikidata.ico
+          for DICT in wikipedia-titles-*.dsl.dz; do
+            [ -f "$DICT" ] || continue
+            BASE="${DICT%.dsl.dz}"
+            tar czf "${BASE}-dsl.tar.gz" "$DICT" "$ICON"
+            echo "  ${BASE}-dsl.tar.gz"
+          done
+
       - name: Upload dictionary artifacts
         uses: actions/upload-artifact@v5
         with:
           name: dictionary
           path: |
             wikipedia-titlepair-en-zh-*.tar.gz
+            wikipedia-titles-*.tar.gz
 
   release:
     needs: [build, dictionary]
@@ -158,6 +174,7 @@ jobs:
             ## Changes
             ${{ steps.changelog.outputs.changelog }}
           files: |
-            wikititlepair-*.tar.gz
-            wikititlepair-*.zip
+            wikitools-*.tar.gz
+            wikitools-*.zip
             wikipedia-titlepair-*.tar.gz
+            wikipedia-titles-*.tar.gz
