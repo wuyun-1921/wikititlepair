@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use rayon::prelude::*;
 
@@ -10,11 +9,13 @@ use clap::Parser;
 use flate2::read::GzDecoder;
 
 mod download;
+mod dsl;
 mod error;
 mod escape;
 
 use download::{ensure_wikidata_dump, get_dump_date, wikidata_listing_url};
 use error::{Result, WikiDictError};
+use dsl::{write_dsl, compress_dictzip};
 use escape::{escape_dsl, is_non_article, unquote};
 
 #[derive(Parser)]
@@ -275,40 +276,28 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
     // Pre-compute escaped DSL strings in parallel
     eprintln!("  Escaping {} entries to DSL...", entry_count);
+    // Body is pre-formatted with << >> for DSL cross-reference syntax
     let escaped: Vec<(String, String)> = entries
         .into_par_iter()
-        .map(|(a, b)| (escape_dsl(&a), escape_dsl(&b)))
+        .map(|(a, b)| (escape_dsl(&a), format!("<<{}>>", escape_dsl(&b))))
         .collect();
 
-    let mut file = BufWriter::new(File::create(&output)?);
-    // Sort lang codes for consistent metadata (en zh == zh en)
+    // Sort lang codes for consistent metadata
     let mut meta_langs = [cli.lang_a.as_str(), cli.lang_b.as_str()];
     meta_langs.sort();
     let lang_pair = format!("{}-{}", meta_langs[0], meta_langs[1]);
-    // DSL format for ABBYY Lingvo
-    writeln!(file, "#NAME \"wikipedia titlepair ({})\"", lang_pair)?;
-    writeln!(file, "#INDEX_LANGUAGE \"{}\"",lang_pair)?;
-    writeln!(file, "#CONTENTS_LANGUAGE \"{}\"", lang_pair)?;
-    writeln!(file)?;
-    
-    for (a, b) in &escaped {
-        write!(file, "{}\n\t<<{}>>\n", a, b)?;
-    }
-    file.flush()?;
 
-    eprintln!(
-        "\nDone! {} entries written to {}",
-        entry_count,
-        output.display()
-    );
+    write_dsl(
+        &output,
+        &format!("wikipedia titlepair ({})", lang_pair),
+        &lang_pair,
+        &lang_pair,
+        &escaped,
+    )?;
 
-    // Compress with dictzip (skip gracefully if unavailable, e.g. Windows)
-    let dz_output = output.with_extension("dsl.dz");
-    eprintln!("Compressing with dictzip...");
-    match Command::new("dictzip").arg(output.to_str().unwrap()).status() {
-        Ok(s) if s.success() => eprintln!("  {} created", dz_output.display()),
-        _ => eprintln!("  dictzip unavailable or failed (dsl file kept)"),
-    }
+    eprintln!("\nDone! {} entries written to {}", entry_count, output.display());
+
+    compress_dictzip(&output);
 
     Ok(())
 }
