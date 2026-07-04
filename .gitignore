@@ -3,6 +3,7 @@
 *.dsl.dz
 *.mdx
 *.mdd
+wikipedia-titles-*.js
 *.dict
 *.idx
 *.ifo
@@ -12,3 +13,4 @@
 wikipedia-titlepair-*.txt
 test.*
 __pycache__/
+.claude

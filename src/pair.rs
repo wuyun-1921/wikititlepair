@@ -130,7 +130,10 @@ fn parse_insert_line(
 }
 
 /// Parse Wikidata wb_items_per_site dump into bidirectional title pairs.
-pub fn parse_dump(path: &Path, lang_a: &str, lang_b: &str) -> Result<Vec<(String, String)>> {
+///
+/// If `full` is true, ALL titles from both languages are included.
+/// Unmatched titles get an empty string as their pair.
+pub fn parse_dump(path: &Path, lang_a: &str, lang_b: &str, full: bool) -> Result<Vec<(String, String)>> {
     // Read entire file into memory for multi-threaded processing
     let file = File::open(path)?;
     let mut decoder = GzDecoder::new(file);
@@ -201,28 +204,59 @@ pub fn parse_dump(path: &Path, lang_a: &str, lang_b: &str) -> Result<Vec<(String
             },
         );
 
-    // Build dictionary: items that exist in both languages
+    // Build dictionary
     let mut entries = Vec::new();
+    let mut matched = 0u64;
     let mut skipped = 0u64;
+    let mut a_only = 0u64;
+    let mut b_only = 0u64;
+
     for (item_id, title_a) in &items_a {
         if let Some(title_b) = items_b.get(item_id) {
             // Skip if titles are identical (case-insensitive)
             if title_a.to_lowercase() == title_b.to_lowercase() {
                 skipped += 1;
+                if full {
+                    entries.push((title_a.clone(), String::new()));
+                    entries.push((title_b.clone(), String::new()));
+                }
                 continue;
             }
             entries.push((title_a.clone(), title_b.clone()));
             entries.push((title_b.clone(), title_a.clone()));
+            matched += 1;
+        } else if full {
+            entries.push((title_a.clone(), String::new()));
+            a_only += 1;
         }
     }
 
-    let matched = entries.len() / 2;
-    eprintln!(
-        "  Found {} matching items ({} entries, {} skipped)",
-        matched,
-        entries.len(),
-        skipped
-    );
+    if full {
+        for (item_id, title_b) in &items_b {
+            if !items_a.contains_key(item_id) {
+                entries.push((title_b.clone(), String::new()));
+                b_only += 1;
+            }
+        }
+    }
+
+    if full {
+        eprintln!(
+            "  {} matched, {} skipped (identical), {} A-only, {} B-only → {} entries",
+            matched,
+            skipped,
+            a_only,
+            b_only,
+            entries.len()
+        );
+    } else {
+        eprintln!(
+            "  Found {} matching items ({} entries, {} skipped)",
+            matched,
+            entries.len(),
+            skipped
+        );
+    }
 
     entries.par_sort();
     entries.dedup();
@@ -267,7 +301,7 @@ mod tests {
         let tmp = std::env::temp_dir().join("wikidict_test_dump.sql.gz");
         std::fs::write(&tmp, &compressed).unwrap();
 
-        let entries = parse_dump(&tmp, "en", "zh").unwrap();
+        let entries = parse_dump(&tmp, "en", "zh", false).unwrap();
         std::fs::remove_file(&tmp).ok();
 
         assert_eq!(entries.len(), 4);
@@ -276,6 +310,29 @@ mod tests {
         assert!(entries.contains(&("Hello".to_string(), "你好".to_string())));
         assert!(entries.contains(&("你好".to_string(), "Hello".to_string())));
         assert!(!entries.contains(&("Same".to_string(), "Same".to_string())));
+    }
+
+    #[test]
+    fn test_full_mode_includes_unmatched() {
+        // Same dump: Music↔音乐 matched, Same↔Same skipped, and "OnlyEN" exists only in enwiki
+        let sql = "INSERT INTO wb_items_per_site VALUES (1,1,'enwiki','Music'),(2,1,'zhwiki','音乐');\nINSERT INTO wb_items_per_site VALUES (3,2,'enwiki','Same'),(4,2,'zhwiki','Same');\nINSERT INTO wb_items_per_site VALUES (5,3,'enwiki','OnlyEN');\n";
+        use std::io::Write;
+        let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        gz.write_all(sql.as_bytes()).unwrap();
+        let compressed = gz.finish().unwrap();
+
+        let tmp = std::env::temp_dir().join("wikidict_test_full.sql.gz");
+        std::fs::write(&tmp, &compressed).unwrap();
+
+        let entries = parse_dump(&tmp, "en", "zh", true).unwrap();
+        std::fs::remove_file(&tmp).ok();
+
+        // Full mode: Music↔音乐 (2), Same empty (1, deduped since identical in both langs), OnlyEN empty (1) = 4
+        assert_eq!(entries.len(), 4);
+        assert!(entries.contains(&("Music".to_string(), "音乐".to_string())));
+        assert!(entries.contains(&("音乐".to_string(), "Music".to_string())));
+        assert!(entries.contains(&("Same".to_string(), String::new())));
+        assert!(entries.contains(&("OnlyEN".to_string(), String::new())));
     }
 
     #[test]

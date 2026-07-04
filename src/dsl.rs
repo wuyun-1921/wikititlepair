@@ -21,7 +21,11 @@ pub fn write_dsl(
     writeln!(file)?;
 
     for (headword, body) in entries {
-        write!(file, "{}\n\t{}\n", headword, body)?;
+        if body.is_empty() {
+            writeln!(file, "{}", headword)?;
+        } else {
+            write!(file, "{}\n\t{}\n", headword, body)?;
+        }
     }
 
     file.flush()?;
