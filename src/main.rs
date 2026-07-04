@@ -192,22 +192,28 @@ fn run_titles(
     });
 
     eprintln!("  Sorting + packing {} entries...", entry_count);
-    // Inject global JS as \\js resource record — MDX readers load it automatically
-    entries.push((
+
+    // Build final entry list with \\js resource at position 0
+    let mut all: Vec<(String, String)> = Vec::with_capacity(entries.len() + 1);
+    all.push((
         "\\js".to_string(),
         format!(
             "document.addEventListener('click',function(e){{var el=e.target.closest('.wl');if(el){{window.open('https://{}.{}.org'+el.getAttribute('data-p'),'_blank')}}}});",
             lang, project
         ),
     ));
+    all.append(&mut entries);
 
     let title_str = format!("{} {} Titles", lang.to_uppercase(), if project == "wiki" { "Wikipedia" } else { project });
     let desc_str = format!("{} article titles from {} {}", lang.to_uppercase(), if project == "wiki" { "Wikipedia" } else { project }, dump_date);
-    mdx::write_mdx(&mdx_path, &title_str, &desc_str, &entries)?;
+    mdx::write_mdx(&mdx_path, &title_str, &desc_str, &all)?;
 
-    // Also write standalone .js (stable name, no dump date suffix)
-    let js_path = mdx_path.with_file_name(format!("wikipedia-titles-{}.js", lang));
-    std::fs::write(&js_path, &entries.last().unwrap().1)?;
+    // GoldenDict loads .js matching the .mdx basename
+    let js_path = mdx_path.with_extension("js");
+    std::fs::write(&js_path, &all[0].1)?;
+    // Also write stable-name copy (survives dump-date changes)
+    let stable_js = mdx_path.with_file_name(format!("wikipedia-titles-{}.js", lang));
+    std::fs::write(&stable_js, &all[0].1)?;
 
     let size_mb = std::fs::metadata(&mdx_path)?.len() as f64 / 1e6;
     eprintln!("\nDone! {} entries → {} ({:.1} MB)", entry_count, mdx_path.display(), size_mb);

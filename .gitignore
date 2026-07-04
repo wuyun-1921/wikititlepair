@@ -3,6 +3,7 @@
 *.dsl.dz
 *.mdx
 *.mdd
+wikipedia-titles-*-*.js
 *.dict
 *.idx
 *.ifo
