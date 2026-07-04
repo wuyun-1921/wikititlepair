@@ -159,7 +159,7 @@ fn run_titles(
     let mut entries = titles::parse_all_titles(&dump_path, lang, project)?;
     let entry_count = entries.len();
 
-    // Convert path to full HTML body for MDX
+    // Compact body: JS (\\js record + .js file) reconstructs full URL
     for (display, path) in entries.iter_mut() {
         *path = format!(
             "<span class=\"wl\" data-p=\"{}\">{}</span>",
