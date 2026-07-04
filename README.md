@@ -1,18 +1,23 @@
-# wikititlepair
+# wikitools
 
-Generate bidirectional DSL and MDX dictionaries from Wikipedia interlanguage links
-via Wikidata. Any two languages. Inspired by ZZ's wikipedia titlepair.
+CLI tools for building dictionaries from Wikimedia data.
 
-## Releases
+## Features
 
-Pre-built **English ↔ Chinese** dictionaries (DSL + MDX) in [releases](https://github.com/wuyun-1921/wikititlepair/releases).
-Updated weekly when Wikidata dump changes.
+- `wikitools pair` — Generate bidirectional DSL dictionaries from Wikipedia interlanguage links via Wikidata
+- `wikitools titles` — Extract all article titles from a Wikimedia project and build a dictionary linking each title to its online page
 
 ## Usage
 
 ```bash
-wikititlepair en zh           # any two Wikipedia language codes
-wikititlepair en zh --download # fetch dump if not cached
+# Build a bidirectional EN↔ZH dictionary
+wikitools pair en zh --download
+
+# Extract all English Wikipedia titles as a URL dictionary
+wikitools titles en --download
+
+# Extract all Japanese Wiktionary titles
+wikitools titles ja --project wiktionary --download
 ```
 
 ## Build
@@ -32,6 +37,9 @@ cargo build --release
 
 MDX conversion: `python scripts/dsl2mdx.py output.dsl`
 
-## Data
+## Data Sources
 
-[Wikidata `wb_items_per_site` dump](https://dumps.wikimedia.org/wikidatawiki/latest/wikidatawiki-latest-wb_items_per_site.sql.gz) (~1.8 GB). Cached at `~/.cache/wikidict/`. Only article titles (no Category/Template/Wikipedia pages).
+- **pair**: [Wikidata `wb_items_per_site` dump](https://dumps.wikimedia.org/wikidatawiki/latest/) (~1.8 GB). Only article titles (no Category/Template/Wikipedia namespaces).
+- **titles**: Wikimedia `all-titles-in-ns0` dump (~100-200 MB per language). Complete list of article titles for any Wikimedia project.
+
+Dumps are cached at `~/.cache/wikitools/`. Use `--download` to fetch on demand.
