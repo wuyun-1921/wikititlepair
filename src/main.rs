@@ -9,9 +9,11 @@ use rayon::prelude::*;
 use clap::Parser;
 use flate2::read::GzDecoder;
 
+mod download;
 mod error;
 mod escape;
 
+use download::{ensure_wikidata_dump, get_dump_date, wikidata_listing_url};
 use error::{Result, WikiDictError};
 use escape::{escape_dsl, is_non_article, unquote};
 
@@ -36,109 +38,6 @@ struct Cli {
     /// Allow downloading if dump not found
     #[arg(long)]
     download: bool,
-}
-
-fn dump_url() -> String {
-    "https://dumps.wikimedia.org/wikidatawiki/latest/wikidatawiki-latest-wb_items_per_site.sql.gz".to_string()
-}
-
-fn get_dump_date() -> Result<String> {
-    let output = Command::new("curl")
-        .args(["-s", "https://dumps.wikimedia.org/wikidatawiki/latest/"])
-        .output()?;
-    
-    let html = String::from_utf8_lossy(&output.stdout);
-    for line in html.lines() {
-        if line.contains("wb_items_per_site.sql.gz") {
-            // Manual scan for DD-Mon-YYYY pattern: 2 digits, -, uppercase, 2 lowercase, -, 4 digits
-            let chars: Vec<char> = line.chars().collect();
-            for i in 0..chars.len().saturating_sub(10) {
-                if chars[i].is_ascii_digit()
-                    && chars[i + 1].is_ascii_digit()
-                    && chars[i + 2] == '-'
-                    && chars[i + 3].is_ascii_uppercase()
-                    && chars[i + 4].is_ascii_lowercase()
-                    && chars[i + 5].is_ascii_lowercase()
-                    && chars[i + 6] == '-'
-                    && chars[i + 7].is_ascii_digit()
-                    && chars[i + 8].is_ascii_digit()
-                    && chars[i + 9].is_ascii_digit()
-                    && chars[i + 10].is_ascii_digit()
-                {
-                    let date_str: String = chars[i..i + 11].iter().collect();
-                    let parts: Vec<&str> = date_str.split('-').collect();
-                    if parts.len() == 3 {
-                        let day = parts[0];
-                        let month = match parts[1] {
-                            "Jan" => "01", "Feb" => "02", "Mar" => "03",
-                            "Apr" => "04", "May" => "05", "Jun" => "06",
-                            "Jul" => "07", "Aug" => "08", "Sep" => "09",
-                            "Oct" => "10", "Nov" => "11", "Dec" => "12",
-                            _ => continue,
-                        };
-                        let year = parts[2];
-                        return Ok(format!("{}{}{}", year, month, day));
-                    }
-                }
-            }
-        }
-    }
-    
-    Err(WikiDictError::Parse("Could not parse dump date".to_string()))
-}
-
-fn download_file(url: &str, path: &Path) -> Result<()> {
-    let filename = path.file_name().unwrap().to_str().unwrap();
-
-    if path.exists() {
-        let backup = path.with_extension("sql.gz.old");
-        if backup.exists() {
-            std::fs::remove_file(&backup)?;
-        }
-        std::fs::rename(path, &backup)?;
-        eprintln!("  renamed {} to {}", filename, backup.file_name().unwrap().to_str().unwrap());
-    }
-
-    let status = Command::new("curl")
-        .args([
-            "-C", "-", "-L", "-o", path.to_str().unwrap(), "-A", "wikidict/0.1",
-            "-sS", "--fail", url,
-        ])
-        .status()?;
-
-    if !status.success() {
-        return Err(WikiDictError::Parse(format!(
-            "curl failed for {}",
-            filename
-        )));
-    }
-
-    Ok(())
-}
-
-fn ensure_dump(cache_dir: &Path, allow_download: bool) -> Result<PathBuf> {
-    let path = cache_dir.join("wikidatawiki-latest-wb_items_per_site.sql.gz");
-
-    if path.exists() && std::fs::metadata(&path)?.len() > 1000 {
-        eprintln!("Using cached dump");
-        return Ok(path);
-    }
-
-    if !allow_download {
-        return Err(WikiDictError::Parse(
-            "Dump not found. Use --download to fetch it.".to_string()
-        ));
-    }
-
-    std::fs::create_dir_all(cache_dir)?;
-
-    eprintln!("Downloading Wikidata items_per_site dump...");
-    let url = dump_url();
-    eprintln!("  {}", url);
-    download_file(&url, &path)?;
-    eprintln!("  done");
-
-    Ok(path)
 }
 
 /// Parse one INSERT statement, extracting (item_id, site_id, title) tuples
@@ -359,10 +258,11 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         cli.cache_dir
     };
 
-    let dump_path = ensure_dump(&cache_dir, cli.download)?;
+    let dump_path = ensure_wikidata_dump(&cache_dir, cli.download)?;
     
     // Get dump date from Wikidata
-    let dump_date = get_dump_date().unwrap_or_else(|_| "latest".to_string());
+    let dump_date = get_dump_date(&wikidata_listing_url(), "wb_items_per_site.sql.gz")
+        .unwrap_or_else(|_| "latest".to_string());
     
     // Default output filename: wikipedia-titlepair-en-zh-20250702.dsl
     let output = cli.output.unwrap_or_else(|| {
