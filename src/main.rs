@@ -8,7 +8,12 @@ use rayon::prelude::*;
 
 use clap::Parser;
 use flate2::read::GzDecoder;
-use thiserror::Error;
+
+mod error;
+mod escape;
+
+use error::{Result, WikiDictError};
+use escape::{escape_dsl, is_non_article, unquote, NON_ARTICLE_PREFIXES};
 
 #[derive(Parser)]
 #[command(name = "wiktitlepair")]
@@ -32,17 +37,6 @@ struct Cli {
     #[arg(long)]
     download: bool,
 }
-
-#[derive(Error, Debug)]
-enum WikiDictError {
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
-
-    #[error("Parse error: {0}")]
-    Parse(String),
-}
-
-type Result<T> = std::result::Result<T, WikiDictError>;
 
 fn dump_url() -> String {
     "https://dumps.wikimedia.org/wikidatawiki/latest/wikidatawiki-latest-wb_items_per_site.sql.gz".to_string()
@@ -354,109 +348,6 @@ fn parse_dump(path: &Path, lang_a: &str, lang_b: &str) -> Result<Vec<(String, St
     Ok(entries)
 }
 
-/// MediaWiki namespace canonical names (English). The Wikidata dump always
-/// uses English canonical names regardless of the wiki's language.
-/// See https://www.mediawiki.org/wiki/Manual:Namespace
-static NON_ARTICLE_PREFIXES: &[&str] = &[
-    "Category",
-    "Template",
-    "Wikipedia",
-    "Portal",
-    "Help",
-    "Module",
-    "WikiProject",
-    "User",
-    "File",
-    "Image",
-    "MediaWiki",
-    "TimedText",
-    "Draft",
-    "Media",
-    "Special",
-    "Talk",
-    "WP",
-];
-
-/// Returns true if the title is a non-article namespace page
-/// (e.g. "Category:Music", "Template:Infobox").
-fn is_non_article(title: &str) -> bool {
-    for prefix in NON_ARTICLE_PREFIXES {
-        let needle = [prefix, ":"].concat();
-        if title.starts_with(&needle) {
-            return true;
-        }
-    }
-    false
-}
-
-/// Escape special characters in DSL headwords and cross-references.
-/// DSL uses these characters for markup, so we must backslash-escape them
-/// to make them literal text. Backslash itself must be doubled.
-/// See docs/dsl-format.md for the full reference.
-fn escape_dsl(s: &str) -> String {
-    let mut result = String::with_capacity(s.len() + 16);
-    for ch in s.chars() {
-        match ch {
-            // Backslash must come first - double it
-            '\\' => result.push_str("\\\\"),
-            // Parentheses mark optional parts of headword
-            '(' => result.push_str("\\("),
-            ')' => result.push_str("\\)"),
-            // Curly braces mark unsorted parts of headword
-            '{' => result.push_str("\\{"),
-            '}' => result.push_str("\\}"),
-            // Square brackets forbidden in heading
-            '[' => result.push_str("\\["),
-            ']' => result.push_str("\\]"),
-            // Forbidden in heading
-            '#' => result.push_str("\\#"),
-            '@' => result.push_str("\\@"),
-            '<' => result.push_str("\\<"),
-            '>' => result.push_str("\\>"),
-            // Forbidden in first heading
-            '~' => result.push_str("\\~"),
-            '^' => result.push_str("\\^"),
-            _ => result.push(ch),
-        }
-    }
-    result
-}
-
-fn unquote(s: &str) -> String {
-    let s = s.trim();
-    if !s.starts_with('\'') || !s.ends_with('\'') {
-        return s.to_string();
-    }
-    
-    let inner = &s[1..s.len() - 1];
-    let bytes = inner.as_bytes();
-    let len = bytes.len();
-    let mut result = Vec::with_capacity(len);
-    let mut i = 0;
-    
-    while i < len {
-        if bytes[i] == b'\\' && i + 1 < len {
-            match bytes[i + 1] {
-                b'\'' => { result.push(b'\''); i += 2; }
-                b'\\' => { result.push(b'\\'); i += 2; }
-                b'n' => { result.push(b'\n'); i += 2; }
-                b'r' => { result.push(b'\r'); i += 2; }
-                b't' => { result.push(b'\t'); i += 2; }
-                b'"' => { result.push(b'"'); i += 2; }
-                _ => { result.push(bytes[i]); i += 1; }
-            }
-        } else if bytes[i] == b'\'' && i + 1 < len && bytes[i + 1] == b'\'' {
-            result.push(b'\'');
-            i += 2;
-        } else {
-            result.push(bytes[i]);
-            i += 1;
-        }
-    }
-    
-    String::from_utf8_lossy(&result).into_owned()
-}
-
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
@@ -525,40 +416,6 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_escape_dsl_parens() {
-        assert_eq!(escape_dsl("Music (2021)"), "Music \\(2021\\)");
-        assert_eq!(escape_dsl("C#"), "C\\#");
-        assert_eq!(escape_dsl("A < B"), "A \\< B");
-        assert_eq!(escape_dsl("x ~ y"), "x \\~ y");
-        assert_eq!(escape_dsl("x^2"), "x\\^2");
-        assert_eq!(escape_dsl("path\\to"), "path\\\\to");
-        assert_eq!(escape_dsl("no escape"), "no escape");
-        assert_eq!(escape_dsl("音乐"), "音乐");
-    }
-
-    #[test]
-    fn test_is_non_article() {
-        assert!(is_non_article("Category:Music"));
-        assert!(is_non_article("Template:Infobox"));
-        assert!(is_non_article("Wikipedia:About"));
-        assert!(is_non_article("Help:Contents"));
-        assert!(is_non_article("Module:Math"));
-        assert!(is_non_article("User:Test"));
-        assert!(!is_non_article("Music"));
-        assert!(!is_non_article("Doraemon: Story"));
-        assert!(!is_non_article("Star Wars: Episode IV"));
-    }
-
-    #[test]
-    fn test_unquote() {
-        assert_eq!(unquote("'hello'"), "hello");
-        assert_eq!(unquote("'it\\'s'"), "it's");
-        assert_eq!(unquote("'back\\\\slash'"), "back\\slash");
-        assert_eq!(unquote("'quote\\\"test\\\"'"), "quote\"test\"");
-        assert_eq!(unquote("'new\\nline'"), "new\nline");
-    }
 
     #[test]
     fn test_parse_insert_line() {
