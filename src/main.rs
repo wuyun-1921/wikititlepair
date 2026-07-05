@@ -155,6 +155,12 @@ fn run_titles(
         PathBuf::from(format!("wikipedia-titles-{}-{}.mdx", lang, dump_date))
     });
 
+    // Skip build if MDX already exists and dump date matches
+    if mdx_path.exists() && std::fs::metadata(&mdx_path)?.len() > 1000 {
+        eprintln!("\nUsing cached MDX: {}", mdx_path.display());
+        return Ok(());
+    }
+
     eprintln!("\nParsing titles dump...");
     let mut entries = titles::parse_all_titles(&dump_path, lang, project)?;
     let entry_count = entries.len();
