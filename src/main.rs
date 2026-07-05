@@ -183,13 +183,7 @@ fn run_titles(
         eprintln!("\nDone! {} entries written to {}", entry_count, output.display());
         compress_dictzip(&output);
     } else {
-        // MDX: add \\js resource record (raw JS, like mdict-utils), sort, format bodies
-        let js_body = format!(
-            "function go(el){{window.open('https://{}.{}.org'+el.getAttribute('data-p'),'_blank')}}",
-            lang, project
-        );
-        entries.push(("\\js".to_string(), js_body));
-
+        // MDX: inline onclick, no external JS — guaranteed to work in GoldenDict
         entries.sort_by(|a, b| {
             let al = a.0.to_lowercase();
             let bl = b.0.to_lowercase();
@@ -208,12 +202,10 @@ fn run_titles(
             }
         });
 
-        // Format bodies: \\js stays raw, titles get <span onclick>
         for (key, path) in entries.iter_mut() {
-            if key == "\\js" { continue; }
             *path = format!(
-                "<span class=\"wl\" data-p=\"{0}\" onclick=\"go(this)\">{1}</span>",
-                path, key
+                "<span class=\"wl\" data-p=\"{0}\" onclick=\"window.open('https://{1}.{2}.org'+this.getAttribute('data-p'),'_blank')\">{3}</span>",
+                path, lang, project, key
             );
         }
 
@@ -226,10 +218,6 @@ fn run_titles(
         let title_str = format!("{} {} Titles", lang.to_uppercase(), proj_display);
         let desc_str = format!("{} article titles from {} {}", lang.to_uppercase(), proj_display, dump_date);
         mdx::write_mdx(&mdx_path, &title_str, &desc_str, &entries)?;
-
-        // Also write external JS file (stable name)
-        let js_path = mdx_path.with_file_name(format!("wikipedia-titles-{}.js", lang));
-        std::fs::write(&js_path, &entries.iter().find(|e| e.0 == "\\js").unwrap().1)?;
 
         let size_mb = std::fs::metadata(&mdx_path)?.len() as f64 / 1e6;
         eprintln!("\nDone! {} entries → {} ({:.1} MB)", entry_count, mdx_path.display(), size_mb);
