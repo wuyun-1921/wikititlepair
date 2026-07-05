@@ -135,7 +135,7 @@ pub fn write_mdx(
          CreationDate=\"2026-07-04\" \
          Compact=\"Yes\" \
          Compat=\"Yes\" \
-         KeyCaseSensitive=\"No\" \
+         KeyCaseSensitive=\"Yes\" \
          Description=\"{}\" \
          Title=\"{}\" \
          DataSourceFormat=\"106\" \
