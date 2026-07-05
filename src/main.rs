@@ -155,20 +155,20 @@ fn run_titles(
         PathBuf::from(format!("wikipedia-titles-{}-{}.mdx", lang, dump_date))
     });
 
-    // Skip build if MDX already exists and dump date matches
-    if mdx_path.exists() && std::fs::metadata(&mdx_path)?.len() > 1000 {
-        eprintln!("\nUsing cached MDX: {}", mdx_path.display());
-        return Ok(());
-    }
-
     eprintln!("\nParsing titles dump...");
     let mut entries = titles::parse_all_titles(&dump_path, lang, project)?;
     let entry_count = entries.len();
 
-    // Compact body: JS (\\js record + .js file) reconstructs full URL
+    // Johnsons pattern: <script> loads JS, onclick calls it
+    // Put <script> tag in first entry body so GoldenDict loads the JS file
+    let js_name = format!("wikipedia-titles-{}.js", lang);
+    if let Some(first) = entries.first_mut() {
+        first.1 = format!("<script src=\"{}\"></script>{}", js_name, first.1);
+    }
+
     for (display, path) in entries.iter_mut() {
         *path = format!(
-            "<span class=\"wl\" data-p=\"{}\">{}</span>",
+            "<span class=\"wl\" data-p=\"{0}\" onclick=\"go(this)\">{1}</span>",
             path, display
         );
     }
@@ -210,10 +210,10 @@ fn run_titles(
     let desc_str = format!("{} article titles from {} {}", lang.to_uppercase(), if project == "wiki" { "Wikipedia" } else { project }, dump_date);
     mdx::write_mdx(&mdx_path, &title_str, &desc_str, &entries)?;
 
-    // Write external JS file referenced by the <script> tag in the first entry
+    // External JS — \`onclick="go(this)"\` in entries calls this
     let js_path = mdx_path.with_file_name(format!("wikipedia-titles-{}.js", lang));
     std::fs::write(&js_path, format!(
-        "document.addEventListener('click',function(e){{var el=e.target.closest('.wl');if(el){{window.open('https://{}.{}.org'+el.getAttribute('data-p'),'_blank')}}}});",
+        "function go(el){{window.open('https://{}.{}.org'+el.getAttribute('data-p'),'_blank')}}",
         lang, project
     ))?;
 
